@@ -788,7 +788,7 @@ jobs:
       - name: terraform apply
         run: terraform apply -input=false -no-color -auto-approve tfplan
 
-      - name: Sorties Terraform et attente de l'état « running »
+           - name: Sorties Terraform et attente de l'état « running »
         id: out
         run: |
           terraform output -json > outputs.json
@@ -803,9 +803,9 @@ jobs:
             echo "|---|---|"
             jq -r 'to_entries[] | select(.key != "https_setup_command" and .key != "ssh_command") | "| \(.key) | `\(.value.value)` |"' outputs.json
           } >> "$GITHUB_STEP_SUMMARY"
+          aws ec2 start-instances --instance-ids "$instance_id" >/dev/null || true
           aws ec2 wait instance-running --instance-ids "$instance_id"
           echo "Instance $instance_id : running"
-
   deploy:
     name: "2.3 Déploiement de l'application (base Supabase)"
     needs: [aws-preflight, terraform]
@@ -925,6 +925,21 @@ jobs:
           fi
           echo "Version active : $(basename "$(readlink -f /opt/landolsi/current)")"
           EOF
+      - name: Clé de chiffrement MFA (stable entre les VM)
+        env:
+          MFA_ENCRYPTION_KEY: ${{ secrets.MFA_ENCRYPTION_KEY }}
+        run: |
+          if [ -z "$MFA_ENCRYPTION_KEY" ]; then
+            echo "::warning::MFA_ENCRYPTION_KEY absent : clé générée par install.sh conservée (liée à cette VM)."
+            exit 0
+          fi
+          if ! [[ "$MFA_ENCRYPTION_KEY" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::MFA_ENCRYPTION_KEY doit faire 64 caractères hexadécimaux (openssl rand -hex 32)"
+            exit 1
+          fi
+          # Clé transmise sur l'entrée standard : absente des lignes de commande et des journaux
+          printf '%s\n' "$MFA_ENCRYPTION_KEY" | ssh ec2 "sudo bash -c 'IFS= read -r k; f=/etc/landolsi/backend.env; if grep -q ^MFA_ENCRYPTION_KEY= \$f; then sed -i \"s|^MFA_ENCRYPTION_KEY=.*|MFA_ENCRYPTION_KEY=\$k|\" \$f; else echo \"MFA_ENCRYPTION_KEY=\$k\" >> \$f; fi; systemctl restart landolsi-backend'"
+          echo "- Clé MFA appliquée depuis le secret GitHub" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Clé SSH de l'administrateur (ADMIN_SSH_PUBLIC_KEY)
         env:
