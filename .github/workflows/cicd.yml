@@ -788,7 +788,7 @@ jobs:
       - name: terraform apply
         run: terraform apply -input=false -no-color -auto-approve tfplan
 
-           - name: Sorties Terraform et attente de l'état « running »
+      - name: Sorties Terraform et attente de l'état « running »
         id: out
         run: |
           terraform output -json > outputs.json
