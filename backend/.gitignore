@@ -1,0 +1,11 @@
+node_modules/
+
+# Secrets : ne jamais versionner (voir .env.example)
+.env
+.env.*
+!.env.example
+certs/
+# Exception : certificat racine Supabase (public), requis par le pipeline
+!certs/
+certs/*
+!certs/prod-ca-2021.crt

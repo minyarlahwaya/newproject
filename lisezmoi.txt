@@ -1,0 +1,184 @@
+LANDOLSI TIRES - Base de données Supabase et pipeline CI/CD
+===========================================================
+
+NOUVEAU (7 novembre 2026)
+- La base est désormais hébergée sur Supabase (PostgreSQL 17 managé).
+  Plus de PostgreSQL local, plus de sauvegarde chiffrée à restaurer :
+  le site et le pipeline se connectent directement à Supabase.
+- Connexion : session pooler aws-0-eu-central-2.pooler.supabase.com:5432,
+  TLS vérifié avec backend/certs/prod-ca-2021.crt (DB_SSL_CA_PATH).
+- Pipeline complet : .github/workflows/cicd.yml (repris de projet_Landolsi)
+    qualité, tests (base jetable), contrôle Supabase, build, Gitleaks
+    -> VM AWS (Terraform) -> install.sh --external-db -> configure-db.sh
+    (Supabase) -> deploy.sh (migrations) -> tests de fumée, CloudWatch
+    -> CodeQL, Semgrep, SCA, IaC, DAST -> notification e-mail.
+  Déclenchement : "[deploy]" ou "[ci]" dans le TITRE du commit poussé sur
+  master, ou Actions > Run workflow.
+- Destroy : .github/workflows/destroy.yml (Run workflow, saisir DESTROY) ;
+  archive uniquement les images téléversées, la base Supabase reste intacte.
+  Secrets GitHub : SUPABASE_DB_HOST, SUPABASE_DB_PORT, SUPABASE_DB_NAME,
+  SUPABASE_DB_USER, SUPABASE_DB_PASSWORD.
+  Relancer : gh workflow run cicd.yml --repo ngrassa/pfeMaster2 --ref master
+- L'ancien workflow db-restore.yml est supprimé. Les sections ci-dessous
+  sont conservées pour l'historique uniquement.
+
+=======================================================================
+(HISTORIQUE) LANDOLSI TIRES - Sauvegarde chiffrée de la base et restauration CI/CD
+=======================================================================
+
+0. OÙ EN EST-ON ? (état au 31 octobre 2026)
+-------------------------------------------
+FAIT
+- Données de développement importées sur le serveur (LANDOLSI_TIRES.sql).
+- Sauvegarde post-import chiffrée, conservée HORS du dépôt public
+  (emplacements au §2).
+- Script de restauration et workflow GitHub Actions poussés (commit 7c56cf7).
+- Restauration testée sur le serveur : comptages identiques à la production.
+
+INFRASTRUCTURE (31/10/2026)
+- 31/10 matin : terraform apply -> instance i-0a4b15152bb2634d6,
+  https://landolsi-tires-54-146-95-182.sslip.io (assistants IA, facture par e-mail).
+- 31/10 ~11h UTC : sauvegarde complète puis terraform destroy de l'instance.
+- L'IP élastique 54.146.95.182 (eipalloc-09a864995fee440c0) est CONSERVÉE :
+  elle est hors de l'état Terraform (variable eip_allocation_id). Au prochain
+  terraform apply, le site revient à la MÊME URL. Ne pas la libérer.
+  Coût ~3,6 $/mois sur le budget du lab tant qu'elle n'est pas associée.
+- Procédure complète de redéploiement : README.md §20, « Redéploiement complet
+  sur AWS depuis GitHub ».
+- 31/10 16h26 UTC : REDÉPLOYÉ (instance i-006a6bd2a8ccdf41f, commit 7163577 :
+  recherche de pneus par photo), HTTPS, Mistral et SMTP configurés,
+  sauvegarde 20261031T105950Z restaurée.
+- 31/10 ~17h46 UTC : terraform destroy (instance terminée, IP élastique
+  54.146.95.182 CONSERVÉE, même URL au prochain apply).
+- SAUVEGARDE LA PLUS RÉCENTE (31/10/2026 17:44 UTC, prise juste avant le
+  destroy : 14 utilisateurs, 9 pneus, 43 commandes, 13 factures, 14 avis,
+  4 réclamations, 36 images), sur le poste d'administration :
+    ~/.local/share/landolsi/backups/landolsi_tires_20261031T174440Z.dump.gpg
+    ~/.local/share/landolsi/backups/landolsi_tires_20261031T174440Z.dump.sha256.txt
+      (somme du dump déchiffré : ef77a521a2c2cf343d1f058f7ec129271c5dec1c08022594a9e6cbd2058bfd4f)
+    ~/.local/share/landolsi/backups/uploads_20261031T174440Z.tar.gz.gpg  (images)
+  Sauvegardes précédentes : 20261031T165500Z, 20261031T105950Z.
+  Même phrase secrète (~/.config/landolsi/db-backup.passphrase).
+  Les sauvegardes du 30/10 (final_20261030T164228Z) sont plus anciennes.
+
+PREMIER TEST DU PIPELINE (exécution 41091349816)
+- Échec attendu à l'étape "Télécharger l'archive chiffrée" :
+    ##[error]secret DB_BACKUP_URL absent
+- Les étapes précédentes sont passées. La restauration n'a pas encore été
+  testée sur GitHub.
+
+RESTE À FAIRE (détail au §5)
+  [ ] a) créer le dépôt privé ngrassa/landolsi-backups et y pousser l'archive
+  [ ] b) créer un jeton fine-grained en lecture seule sur ce dépôt
+  [ ] c) déposer les secrets DB_BACKUP_PASSPHRASE, DB_BACKUP_URL, DB_BACKUP_TOKEN
+  [ ] d) relancer le test :
+         gh workflow run db-restore.yml --repo ngrassa/projet_Landolsi
+         gh run list --repo ngrassa/projet_Landolsi --limit 3
+  [ ] e) (plus tard) secrets EC2_* pour le job restore-ec2
+  [ ] Copier la phrase secrète dans un gestionnaire de mots de passe.
+
+1. PRINCIPE
+-----------
+- Le dépôt GitHub est PUBLIC. La sauvegarde de la base (e-mails, téléphones,
+  adresses, hachés de mots de passe) n'y est donc JAMAIS versionnée, même
+  chiffrée : une fois publiée, elle ne pourrait plus être retirée.
+- Seules les sommes SHA-256 de référence sont dans le dépôt (db/backup/) :
+    landolsi_tires.dump.gpg.sha256   somme de l'archive chiffrée
+                                     (= version attendue par le pipeline)
+    landolsi_tires.dump.sha256.txt   somme de l'archive déchiffrée
+- Le pipeline télécharge l'archive depuis un stockage PRIVÉ, vérifie sa
+  somme, la déchiffre et la restaure.
+
+2. OÙ SONT LES ÉLÉMENTS
+-----------------------
+- Archive chiffrée (GPG AES-256, pg_dump PostgreSQL 16 du 30/10/2026,
+  12 utilisateurs / 9 pneus / 38 commandes / 10 factures / 13 avis) :
+    ~/.local/share/landolsi/backups/landolsi_tires.dump.gpg
+- Phrase secrète (hors Git) :
+    ~/.config/landolsi/db-backup.passphrase
+  => En garder une copie dans un gestionnaire de mots de passe : sans elle,
+     l'archive est irrécupérable.
+- Sauvegardes quotidiennes du serveur (en clair, mode 0600) :
+    /var/backups/landolsi/
+
+3. FICHIERS DU DÉPÔT
+--------------------
+- scripts/restore-encrypted-backup.sh
+    Vérifie la somme de l'archive, la déchiffre, puis restaure avec
+    restore-db.sh. Refuse une archive différente de la version de référence.
+      DB_BACKUP_PASSPHRASE='...' scripts/restore-encrypted-backup.sh -- \
+          --target-db landolsi_verif --create --env-file backend/.env
+      scripts/restore-encrypted-backup.sh --archive /chemin/landolsi_tires.dump.gpg \
+          --passphrase-file ~/.config/landolsi/db-backup.passphrase \
+          --decrypt-only /tmp/landolsi_tires.dump
+
+- .github/workflows/db-restore.yml
+    * verify      : automatique à chaque modification de db/backup/ ou des
+                    scripts ; télécharge l'archive, la restaure dans un
+                    PostgreSQL 16 éphémère et vérifie les comptages.
+                    Aucun effet sur le serveur.
+    * restore-ec2 : manuel uniquement (Actions > Restauration base de données
+                    > Run workflow, target = ec2, confirm = RESTAURER).
+                    Sauvegarde d'abord la base du serveur, arrête l'API,
+                    restaure, redémarre, contrôle /health.
+
+- Documentation : README.md §20 et docs/deployment/database-backup-restore.md §6.
+
+4. TESTS RÉALISÉS
+-----------------
+- Restauration de l'archive chiffrée sur le serveur dans une base temporaire
+  (supprimée ensuite) : comptages et séquences identiques à la production.
+- Une mauvaise phrase secrète et une archive modifiée sont rejetées.
+- Le pipeline n'a pas encore tourné sur GitHub : il faut d'abord les étapes
+  du §5.
+
+5. ACTIONS À FAIRE PAR L'ADMINISTRATEUR
+---------------------------------------
+a) Déposer l'archive dans un dépôt GitHub PRIVÉ :
+
+     gh repo create ngrassa/landolsi-backups --private --clone
+     cd landolsi-backups
+     cp ~/.local/share/landolsi/backups/landolsi_tires.dump.gpg .
+     git add . && git commit -m "Sauvegarde 2026-10-30" && git push -u origin HEAD
+     cd ..
+
+b) Créer un jeton GitHub "fine-grained" en lecture seule (Contents: Read)
+   limité au dépôt landolsi-backups (Settings > Developer settings >
+   Personal access tokens > Fine-grained tokens).
+
+c) Déposer les secrets dans le dépôt projet_Landolsi :
+
+     gh secret set DB_BACKUP_PASSPHRASE --repo ngrassa/projet_Landolsi \
+         < ~/.config/landolsi/db-backup.passphrase
+     gh secret set DB_BACKUP_URL --repo ngrassa/projet_Landolsi \
+         --body "https://raw.githubusercontent.com/ngrassa/landolsi-backups/main/landolsi_tires.dump.gpg"
+     gh secret set DB_BACKUP_TOKEN --repo ngrassa/projet_Landolsi
+         (coller le jeton de l'étape b quand il est demandé)
+
+   Adapter "main" si la branche du dépôt privé porte un autre nom.
+   Alternative S3 : URL présignée dans DB_BACKUP_URL, sans DB_BACKUP_TOKEN.
+
+d) Pousser une modification (déclenche le job verify) - déjà fait le 30/10 :
+
+     git add .gitignore README.md lisezmoi.txt docs/deployment/database-backup-restore.md \
+         .github db/backup scripts/restore-encrypted-backup.sh
+     git commit -m "Sauvegarde chiffrée hors dépôt et restauration CI/CD"
+     git push origin master
+
+   Résultat visible dans l'onglet Actions ; relancer à la main :
+     gh workflow run db-restore.yml --repo ngrassa/projet_Landolsi
+
+e) Pour utiliser plus tard le job restore-ec2 :
+   - secrets supplémentaires : EC2_HOST, EC2_SSH_KEY, EC2_KNOWN_HOSTS
+       (EC2_KNOWN_HOSTS : ssh-keyscan -t ed25519 18.213.152.8)
+   - le Security Group limite SSH à l'IP de l'administrateur : l'ouvrir
+     temporairement aux runners GitHub Actions, ou utiliser un runner
+     auto-hébergé.
+   - conseillé : ajouter des relecteurs obligatoires à l'environnement
+     GitHub "production".
+
+6. NOUVELLE SAUVEGARDE DE RÉFÉRENCE
+-----------------------------------
+Procédure complète : docs/deployment/database-backup-restore.md §6. Après
+chiffrement, mettre à jour l'archive dans le dépôt privé ET les deux fichiers
+db/backup/*.sha256* dans ce dépôt, sinon le pipeline refuse l'archive.
