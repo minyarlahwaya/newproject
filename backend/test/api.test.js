@@ -112,10 +112,10 @@ test("inscription, connexion par cookie et refus des droits admin (403)", opts, 
 test("double authentification : enrôlement puis connexion en deux étapes", opts, async () => {
     const { authenticator } = require("otplib");
     const email = `mfa-${Date.now()}@example.com`;
-    const password = "Motdepasse123";
+    const password = "Motdepasse123!";
     const json = { "Content-Type": "application/json" };
 
-    await fetch(`${baseUrl}/users/register`, {
+    const reg = await fetch(`${baseUrl}/users/register`, {
         method: "POST", headers: json,
         body: JSON.stringify({
             nom: "Test", prenom: "MFA", email, password,
@@ -123,6 +123,7 @@ test("double authentification : enrôlement puis connexion en deux étapes", opt
             codePostal: "4000", pays: "Tunisie", typeClient: "particulier"
         })
     });
+    assert.strictEqual(reg.status, 201, await reg.clone().text());
 
     const login1 = await fetch(`${baseUrl}/users/login`, {
         method: "POST", headers: json, body: JSON.stringify({ email, password })
