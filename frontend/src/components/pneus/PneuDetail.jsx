@@ -70,7 +70,7 @@ function PneuDetail({ pneu }) {
                         <div className="brand-logo">
                             {pneu.marque?.logo && (
                                 <img
-                                    src={`${API_URL}/images/${pneu.marque.logo}`}
+                                    src={`${API_URL}/uploadPneu/${pneu.marque.logo}`}
                                     alt={pneu.marque.nom}
                                 />
                             )}
