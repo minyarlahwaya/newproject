@@ -5,7 +5,7 @@
 // Formats acceptés : 205/55 R16, 205/55R16, 205/55ZR16, 205/55/16,
 // 205/55/R16, 205/55-16, 205 55 16, 205/55 R 16 (suivis ou non des indices)
 const DIMENSION_RE =
-  /^\s*(\d{3})\s*\/\s*(\d{2})\s*(?:\/|Z?R|-)\s*(\d{2})\s*$/i;
+  /(?<!\d)(\d{3})\s*[\/\s]\s*(\d{2})\s*(?:[\/\s-]\s*)?(?:Z?R\s*)?(\d{2})(?!\d)/i;
 
 function parseDimension(text) {
     const m = DIMENSION_RE.exec(String(text || ""));

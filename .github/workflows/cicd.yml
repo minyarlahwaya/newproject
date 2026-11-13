@@ -277,9 +277,10 @@ jobs:
           echo "Migrations idempotentes : OK"
 
       - name: Tests backend (node:test + couverture)
+        timeout-minutes: 5
         working-directory: backend
         run: |
-          node --test --test-concurrency=1 --experimental-test-coverage \
+          node --test --test-concurrency=1 --test-force-exit --experimental-test-coverage \
             --test-reporter=spec  --test-reporter-destination=stdout \
             --test-reporter=junit --test-reporter-destination="$RUNNER_TEMP/junit.xml" \
             test/*.test.js | tee "$RUNNER_TEMP/tests.log"
